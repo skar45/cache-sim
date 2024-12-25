@@ -4,6 +4,10 @@
 #include <stdlib.h>
 #include <math.h>
 
+int hits = 0;
+int misses = 0;
+int evictions = 0;
+
 typedef struct CacheLine {
   long tag;
   char valid;
@@ -18,8 +22,17 @@ typedef struct Node {
 typedef struct LL {
   struct Node* head;
   struct Node* tail;
+  // cache lines per set as length of linked list
   int size;
 } LL;
+
+typedef struct Cache {
+  // length of cache_set
+  unsigned int sets;
+  // size of block per cache line
+  unsigned int blocks; 
+  struct LL** cache_set;
+} Cache;
 
 CacheLine* create_cl(int tag, int valid) {
   struct CacheLine* cache = (CacheLine*)malloc(sizeof(CacheLine));
@@ -73,11 +86,15 @@ int lru_read(LL* list, long tag) {
     iter_node = iter_node->next;
   }
 
-  if (invalid_node && tag_node != NULL) {
+  if (invalid_node && tag_node == NULL) {
     CacheLine* cache = invalid_node->cache;
     cache->tag = tag;
     cache->valid = 1;
     return 0;
+  }
+
+  if (!iter_node) {
+    iter_node = list->tail;
   }
 
   while (iter_node->prev) {
@@ -87,14 +104,15 @@ int lru_read(LL* list, long tag) {
     cache->valid = prev_cache->valid;
     iter_node = iter_node->prev;
   }
+
   list->head->cache->tag = tag;
   list->head->cache->valid = 1;
   return tag_node != NULL? 2: 1;
 }
 
-void get_set_tag(long addr, int set_size, int block_size, int* set, long* tag) {
-  int b_bits = log2(block_size);
-  int s_bits = log2(set_size);
+void get_set_tag(long addr, int sets, int blocks, int* set, long* tag) {
+  int b_bits = log2(blocks);
+  int s_bits = log2(sets);
   /**
    * Get set bits:
    * | 1111 | 1111 | 1111 |
@@ -106,29 +124,72 @@ void get_set_tag(long addr, int set_size, int block_size, int* set, long* tag) {
   *tag = addr >> (s_bits + b_bits);
 }
 
-int read_from_cache(int sets, LL* c[sets], long addr, int block_size) {
+int read_from_cache(Cache* c, long addr, int block_size) {
   int set;
   long tag;
-  get_set_tag(addr, sets, block_size, &set, &tag);
-  int cc = lru_read(set, tag);
-  printf("reading from cache addr:  %lx, block_size: %d", addr, block_size);
+  get_set_tag(addr, c->sets, c->blocks, &set, &tag);
+  int cc = lru_read(c->cache_set[set], tag);
+  switch (cc) {
+    case 0:
+      misses++;
+      break;
+    case 1:
+      misses++;
+      evictions++;
+      break;
+    case 2:
+      hits++;
+      break;
+  }
   return 1;
 }
 
-int store_in_cache(int sets, LL* c[sets], long addr, int block_size) {
-  printf("storing in cache addr:  %lx, block_size: %d", addr, block_size);
+int store_in_cache(Cache* c, long addr, int block_size) {
+  int set;
+  long tag;
+  get_set_tag(addr, c->sets, c->blocks, &set, &tag);
+  int cc = lru_read(c->cache_set[set], tag);
+  switch (cc) {
+    case 0:
+      misses++;
+      break;
+    case 1:
+      misses++;
+      evictions++;
+      break;
+    case 2:
+      hits++;
+      break;
+  }
   return 1;
 }
 
-int store_and_load_from_cache(int sets, LL* c[sets], long addr, int block_size) {
-  printf("storing and loading from cache addr:  %lx, block_size: %d", addr, block_size);
+int store_and_load_from_cache(Cache* c, long addr, int block_size) {
+  int set;
+  long tag;
+  get_set_tag(addr, c->sets, c->blocks, &set, &tag);
+  int cc = lru_read(c->cache_set[set], tag);
+  switch (cc) {
+    case 0:
+      misses++;
+      hits++;
+      break;
+    case 1:
+      misses++;
+      hits++;
+      evictions++;
+      break;
+    case 2:
+      hits++;
+      break;
+  }
   return 1;
 }
 
 int main(int argc, char* argv[]) {
     int i;
     char* endptr;
-    int sets = 0, lines = 0, blocks = 0;
+    int sets = 0, lines = 0, blocks = 0, set_bits = 0, block_bits = 0;
     // int hits = 0, misses = 0;
     char* tf;
     for (i = 0; i < argc; i++) {
@@ -139,26 +200,29 @@ int main(int argc, char* argv[]) {
       }
 
       if (prefix == '-' && suffix == 's') {
-	sets = strtol(argv[i+1], &endptr, 10);
+	set_bits = strtol(argv[i+1], &endptr, 10);
       }
 
       if (prefix == '-' && suffix == 'b') {
-	blocks = strtol(argv[i+1], &endptr, 10);
+	block_bits = strtol(argv[i+1], &endptr, 10);
       }
 
       if (prefix == '-' && suffix == 't') {
 	tf = argv[i+1];
       }
     }
-
     if (tf == NULL) return 0;
 
+    sets = 1 << set_bits;
+    blocks = 1 << block_bits;
+
     LL* cache_set[sets];
-    
-    int j;
-    for (j = 0; j < sets; j++){
-      cache_set[j] = init_ll(lines);
+
+    for (i = 0; i < sets; i++){
+      cache_set[i] = init_ll(lines);
     }
+
+    struct Cache cache =  { sets, blocks, cache_set };
 
     printf("blocks: %d \n", blocks);
     printf("lines: %d \n", lines);
@@ -188,29 +252,27 @@ int main(int argc, char* argv[]) {
 	  case 76:
 	    addr = strtol(&buffer[i+2], &e, 16);
 	    block_size = strtol(++e, &e, 10);
-	    read_from_cache(sets, cache_set, addr, block_size);
+	    read_from_cache(&cache, addr, block_size);
 	    break;
 	  // M
 	  case 77:
 	    addr = strtol(&buffer[i+2], &e, 16);
 	    block_size = strtol(++e, &e, 10);
-	    store_and_load_from_cache(sets, cache_set, addr, block_size);
+	    store_and_load_from_cache(&cache, addr, block_size);
 	    break;
 	  // S
 	  case 83:
 	    addr = strtol(&buffer[i+2], &e, 16);
 	    block_size = strtol(++e, &e, 10);
-	    store_in_cache(sets, cache_set, addr, block_size);
+	    store_in_cache(&cache, addr, block_size);
 	    break;
 	}
 	break;
-	printf("%c ", buffer[i]);
       }
-      printf("\n");
     }
 
     fclose(file);
 
-    printSummary(0, 0, 0);
-    return 0;
+    printSummary(hits, misses, evictions);
+    return 1;
 }
