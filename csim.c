@@ -73,6 +73,9 @@ int lru_read(LL* list, long tag) {
   Node* invalid_node = NULL;
   Node* tag_node = NULL;
 
+  // 0, 1, 2
+  int ret_code;
+
   while (iter_node) {
     int valid = iter_node->cache->valid;
     long iter_tag = iter_node->cache->tag;
@@ -81,22 +84,24 @@ int lru_read(LL* list, long tag) {
     }
     if (iter_tag == tag && valid == 1) {
       tag_node = iter_node;
+      // it's a cache hit
+      ret_code = 2;
       break;
     }
     iter_node = iter_node->next;
   }
 
   if (invalid_node && tag_node == NULL) {
-    CacheLine* cache = invalid_node->cache;
-    cache->tag = tag;
-    cache->valid = 1;
-    return 0;
-  }
-
-  if (!iter_node) {
+    iter_node = invalid_node;
+    // no tag in cache but an empty line means a plain old cache miss
+    ret_code = 0;
+  } else if (tag_node == NULL) {
     iter_node = list->tail;
+    // no tag in cache and no empty line therefore we need to evict a cache line
+    ret_code = 1;
   }
 
+  // LRU ordering
   while (iter_node->prev) {
     CacheLine* cache = iter_node->cache;
     CacheLine* prev_cache = iter_node->prev->cache;
@@ -107,7 +112,7 @@ int lru_read(LL* list, long tag) {
 
   list->head->cache->tag = tag;
   list->head->cache->valid = 1;
-  return tag_node != NULL? 2: 1;
+  return ret_code;
 }
 
 void get_set_tag(long addr, int sets, int blocks, int* set, long* tag) {
@@ -181,6 +186,7 @@ int store_and_load_from_cache(Cache* c, long addr, int block_size) {
       break;
     case 2:
       hits++;
+      hits++;
       break;
   }
   return 1;
@@ -223,11 +229,6 @@ int main(int argc, char* argv[]) {
     }
 
     struct Cache cache =  { sets, blocks, cache_set };
-
-    printf("blocks: %d \n", blocks);
-    printf("lines: %d \n", lines);
-    printf("sets: %d \n", sets);
-
 
     FILE* file = fopen(tf, "r");
     if (file == NULL) {
