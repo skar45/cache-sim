@@ -22,6 +22,33 @@ int is_transpose(int M, int N, int A[N][M], int B[M][N]);
 char transpose_submit_desc[] = "Transpose submission";
 void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 {
+    // 32 bytes / 4 bytes = 8 max hits per line
+    // 1000 / 4 bytes = 250 max hits in a cache
+    // 32 sets
+    // possibly 8x8 submatricies
+    int m_l = M % 16;
+    int n_l = N % 16;
+    int block_size = 16;
+    
+    int n = block_size * (N / block_size);
+    int m = block_size * (M  / block_size);
+    int i, ii, j, jj;
+
+    for (jj = 0; jj < m; jj += block_size) {
+      for (ii = 0; ii < n; ii += block_size) {
+	int tmp[block_size][block_size];
+	for (i = 0; i < block_size; i++) {
+	  for (j = 0; j <  block_size; j++) {
+	    tmp[j][i] = A[ii + i][jj + j];
+	  }
+	}
+	for (j = 0; j < block_size; j++) {
+	  for (i = 0; i <  block_size; i++) {
+	    B[jj + j][ii + i] = tmp[j][i];
+	  }
+	}
+      }
+    }
 }
 
 /* 
@@ -42,7 +69,7 @@ void trans(int M, int N, int A[N][M], int B[M][N])
             tmp = A[i][j];
             B[j][i] = tmp;
         }
-    }    
+    }
 
 }
 
@@ -60,6 +87,8 @@ void registerFunctions()
 
     /* Register any additional transpose functions */
     registerTransFunction(trans, trans_desc); 
+    // registerTransFunction(trans2, trans2_desc); 
+    // registerTransFunction(trans3, trans3_desc); 
 
 }
 
