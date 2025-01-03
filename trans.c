@@ -26,36 +26,22 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
     // 1000 / 4 bytes = 250 max hits in a cache
     // 32 sets
     int min_size = M > N ? N: M;
-    int block_size = min_size > 24: 16: 8;
-    int m_l = M % block_size;
-    int n_l = N % block_size;
-    
-    int n = block_size * (N / block_size);
-    int m = block_size * (M  / block_size);
+    int block_size = min_size > 24 ? 16: 8;
     int i, ii, j, jj;
 
-    for (jj = 0; jj < m; jj += block_size) {
-      for (ii = 0; ii < n; ii += block_size) {
+    for (jj = 0; jj < M; jj += block_size) {
+      for (ii = 0; ii < N; ii += block_size) {
 	int tmp[block_size][block_size];
-	for (i = 0; i < block_size; i++) {
-	  for (j = 0; j <  block_size; j++) {
+	for (i = 0; (i < block_size) && (ii + i < N); i++) {
+	  for (j = 0; (j <  block_size) && (jj + j < M); j++) {
 	    tmp[j][i] = A[ii + i][jj + j];
 	  }
 	}
-	for (j = 0; j < block_size; j++) {
-	  for (i = 0; i <  block_size; i++) {
+	for (j = 0; (j <  block_size) && (jj + j < M); j++) {
+	  for (i = 0; (i < block_size) && (ii + i < N); i++) {
 	    B[jj + j][ii + i] = tmp[j][i];
 	  }
 	}
-      }
-    }
-
-    if (!n_l && !m_l) return;
-
-    // Tranpose the rest
-    for (i = 0; i < n_l; i++) {
-      for (j = 0; j <  m_l; j++) {
-	B[j][i] = A[i][j];
       }
     }
 }
