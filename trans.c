@@ -25,10 +25,10 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
     // 32 bytes / 4 bytes = 8 max hits per line
     // 1000 / 4 bytes = 250 max hits in a cache
     // 32 sets
-    // possibly 8x8 submatricies
-    int m_l = M % 16;
-    int n_l = N % 16;
-    int block_size = 16;
+    int min_size = M > N ? N: M;
+    int block_size = min_size > 24: 16: 8;
+    int m_l = M % block_size;
+    int n_l = N % block_size;
     
     int n = block_size * (N / block_size);
     int m = block_size * (M  / block_size);
@@ -47,6 +47,15 @@ void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 	    B[jj + j][ii + i] = tmp[j][i];
 	  }
 	}
+      }
+    }
+
+    if (!n_l && !m_l) return;
+
+    // Tranpose the rest
+    for (i = 0; i < n_l; i++) {
+      for (j = 0; j <  m_l; j++) {
+	B[j][i] = A[i][j];
       }
     }
 }
@@ -87,9 +96,6 @@ void registerFunctions()
 
     /* Register any additional transpose functions */
     registerTransFunction(trans, trans_desc); 
-    // registerTransFunction(trans2, trans2_desc); 
-    // registerTransFunction(trans3, trans3_desc); 
-
 }
 
 /* 
